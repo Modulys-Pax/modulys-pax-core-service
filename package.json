@@ -1,0 +1,32 @@
+{
+  "name": "modulys-pax-core-service",
+  "version": "1.0.0",
+  "description": "Microserviço Core do Modulys Pax - empresas, filiais, funcionários, perfis",
+  "type": "module",
+  "main": "./src/server.ts",
+  "scripts": {
+    "dev": "dotenv -e .env -- tsx watch src/server.ts",
+    "start": "dotenv -e .env -- NODE_ENV=production node dist/server.js",
+    "build": "tsc",
+    "type-check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@fastify/cors": "^11.0.1",
+    "config": "^3.3.12",
+    "fastify": "^5.1.0",
+    "pg": "^8.11.3",
+    "pino": "^9.6.0",
+    "pino-pretty": "^13.0.0"
+  },
+  "devDependencies": {
+    "@types/config": "^3.3.3",
+    "@types/node": "^20.11.0",
+    "@types/pg": "^8.16.0",
+    "dotenv-cli": "^8.0.0",
+    "tsx": "^4.7.1",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
