@@ -70,8 +70,8 @@ export async function registerCompanyRoutes(app: FastifyInstance): Promise<void>
     try {
       const company = await withTenantDb(tenantId, async (client) => {
         const res = await client.query(
-          `INSERT INTO companies (name, document, email, "tradeName", phone, address, city, state, "zipCode")
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+          `INSERT INTO companies (name, document, email, "tradeName", phone, address, city, state, "zipCode", "updatedAt")
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
            RETURNING id, name, "tradeName", document, email, phone, address, city, state, "zipCode", "isActive", "createdAt", "updatedAt"`,
           [name, document, email, tradeName || null, phone || null, address || null, city || null, state || null, zipCode || null],
         );
@@ -81,6 +81,67 @@ export async function registerCompanyRoutes(app: FastifyInstance): Promise<void>
     } catch (e: any) {
       log.error({ error: e, tenantId }, 'Create company failed');
       return reply.code(500).send({ error: e.message || 'Internal error' });
+    }
+  });
+
+  app.patch<{
+    Params: { id: string };
+    Body: Partial<{
+      name: string;
+      tradeName: string;
+      document: string;
+      email: string;
+      phone: string;
+      address: string;
+      city: string;
+      state: string;
+      zipCode: string;
+      isActive: boolean;
+    }>;
+  }>('/companies/:id', async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params;
+    const body = (request.body || {}) as Record<string, unknown>;
+    const allowed = ['name', 'tradeName', 'document', 'email', 'phone', 'address', 'city', 'state', 'zipCode', 'isActive'];
+    const setKeys = Object.keys(body).filter((k) => allowed.includes(k));
+    if (setKeys.length === 0) {
+      return reply.code(400).send({ error: 'No valid fields to update' });
+    }
+    try {
+      const company = await withTenantDb(tenantId, async (client) => {
+        const setClause = setKeys.map((k, i) => `"${k === 'isActive' ? 'isActive' : k}" = $${i + 1}`).join(', ');
+        const values = setKeys.map((k) => body[k]);
+        const res = await client.query(
+          `UPDATE companies SET ${setClause}, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $${setKeys.length + 1} RETURNING id, name, "tradeName", document, email, phone, address, city, state, "zipCode", "isActive", "createdAt", "updatedAt"`,
+          [...values, id],
+        );
+        return res.rows[0];
+      });
+      if (!company) return reply.code(404).send({ error: 'Company not found' });
+      return reply.code(200).send(company);
+    } catch (e: any) {
+      log.error({ error: e, tenantId }, 'Update company failed');
+      return reply.code(500).send({ error: e.message || 'Internal error' });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>('/companies/:id', async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params;
+    try {
+      const deleted = await withTenantDb(tenantId, async (client) => {
+        const res = await client.query('DELETE FROM companies WHERE id = $1 RETURNING id', [id]);
+        return res.rowCount ?? 0;
+      });
+      if (deleted === 0) return reply.code(404).send({ error: 'Company not found' });
+      return reply.code(204).send();
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string };
+      if (err?.code === '23503') {
+        return reply.code(409).send({ error: 'Company has related records and cannot be deleted' });
+      }
+      log.error({ error: e, tenantId }, 'Delete company failed');
+      return reply.code(500).send({ error: err?.message || 'Internal error' });
     }
   });
 

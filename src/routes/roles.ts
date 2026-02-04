@@ -75,5 +75,57 @@ export async function registerRoleRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
+  app.patch<{
+    Params: { id: string };
+    Body: Partial<{
+      name: string;
+      description: string;
+      isActive: boolean;
+      companyId: string;
+    }>;
+  }>('/roles/:id', async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params;
+    const body = (request.body || {}) as Record<string, unknown>;
+    const allowed = ['name', 'description', 'isActive', 'companyId'];
+    const setKeys = Object.keys(body).filter((k) => allowed.includes(k));
+    if (setKeys.length === 0) {
+      return reply.code(400).send({ error: 'No valid fields to update' });
+    }
+    try {
+      const role = await withTenantDb(tenantId, async (client) => {
+        const setClause = setKeys.map((k, i) => `"${k === 'companyId' ? 'companyId' : k === 'isActive' ? 'isActive' : k}" = $${i + 1}`).join(', ');
+        const values = setKeys.map((k) => body[k]);
+        const res = await client.query(
+          `UPDATE roles SET ${setClause}, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $${setKeys.length + 1} RETURNING id, name, description, "isActive", "companyId", "createdAt", "updatedAt"`,
+          [...values, id],
+        );
+        return res.rows[0];
+      });
+      if (!role) return reply.code(404).send({ error: 'Role not found' });
+      return reply.code(200).send(role);
+    } catch (e: any) {
+      log.error({ error: e, tenantId }, 'Update role failed');
+      return reply.code(500).send({ error: e.message || 'Internal error' });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>('/roles/:id', async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params;
+    try {
+      const deleted = await withTenantDb(tenantId, async (client) => {
+        const res = await client.query('DELETE FROM roles WHERE id = $1 RETURNING id', [id]);
+        return res.rowCount ?? 0;
+      });
+      if (deleted === 0) return reply.code(404).send({ error: 'Role not found' });
+      return reply.code(204).send();
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string };
+      log.error({ error: e, tenantId }, 'Delete role failed');
+      return reply.code(500).send({ error: err?.message || 'Internal error' });
+    }
+  });
+
   log.info('Role routes registered');
 }

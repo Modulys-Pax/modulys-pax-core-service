@@ -75,5 +75,63 @@ export async function registerBranchRoutes(app: FastifyInstance): Promise<void> 
     }
   });
 
+  app.patch<{
+    Params: { id: string };
+    Body: Partial<{
+      name: string;
+      code: string;
+      companyId: string;
+      address: string;
+      city: string;
+      state: string;
+      isActive: boolean;
+    }>;
+  }>('/branches/:id', async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params;
+    const body = (request.body || {}) as Record<string, unknown>;
+    const allowed = ['name', 'code', 'companyId', 'address', 'city', 'state', 'isActive'];
+    const setKeys = Object.keys(body).filter((k) => allowed.includes(k));
+    if (setKeys.length === 0) {
+      return reply.code(400).send({ error: 'No valid fields to update' });
+    }
+    try {
+      const branch = await withTenantDb(tenantId, async (client) => {
+        const setClause = setKeys.map((k, i) => `"${k === 'companyId' ? 'companyId' : k === 'isActive' ? 'isActive' : k}" = $${i + 1}`).join(', ');
+        const values = setKeys.map((k) => body[k]);
+        const res = await client.query(
+          `UPDATE branches SET ${setClause}, "updatedAt" = CURRENT_TIMESTAMP WHERE id = $${setKeys.length + 1} RETURNING id, name, code, address, city, state, "isActive", "companyId", "createdAt", "updatedAt"`,
+          [...values, id],
+        );
+        return res.rows[0];
+      });
+      if (!branch) return reply.code(404).send({ error: 'Branch not found' });
+      return reply.code(200).send(branch);
+    } catch (e: any) {
+      log.error({ error: e, tenantId }, 'Update branch failed');
+      return reply.code(500).send({ error: e.message || 'Internal error' });
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>('/branches/:id', async (request, reply) => {
+    const tenantId = getTenantId(request);
+    const { id } = request.params;
+    try {
+      const deleted = await withTenantDb(tenantId, async (client) => {
+        const res = await client.query('DELETE FROM branches WHERE id = $1 RETURNING id', [id]);
+        return res.rowCount ?? 0;
+      });
+      if (deleted === 0) return reply.code(404).send({ error: 'Branch not found' });
+      return reply.code(204).send();
+    } catch (e: unknown) {
+      const err = e as { code?: string; message?: string };
+      if (err?.code === '23503') {
+        return reply.code(409).send({ error: 'Branch has related employees and cannot be deleted' });
+      }
+      log.error({ error: e, tenantId }, 'Delete branch failed');
+      return reply.code(500).send({ error: err?.message || 'Internal error' });
+    }
+  });
+
   log.info('Branch routes registered');
 }
